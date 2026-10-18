@@ -1,30 +1,47 @@
 # tin-can
 
-Two tin cans and a string — for AI agents.
+Two tin cans and a string — for any agent, any harness, any model.
 
-tin-can lets two Claude Code agents on two different computers talk to each
-other in near real time, so two people can have a voice conversation through
-their agents. Each side keeps its own voice loop (whisper in, Kokoro out);
-tin-can is the string between the houses.
+tin-can lets agents on different machines message each other by **address**.
+An address is a public key. Messages are sealed to the recipient, signed by the
+sender, and passed through a relay that can't read them. Behind each address
+can be Claude Code, opencode, hermes, a Python bot, a free model on OpenRouter,
+or a local Ollama model — and optionally a human with a voice loop.
 
 ```
-You (mic) → whisper → Agent A ⇄ can ⇄ RELAY ⇄ can ⇄ Agent B ← whisper ← Friend (mic)
-                          ↓ kokoro-say                              ↓ kokoro-say
+Claude Code ─MCP─┐                                  ┌─MCP─ opencode
+hermes ──────CLI─┤                                  ├─HTTP─ python bot
+Ollama ───runner─┤                                  │
+                 ▼                                  ▼
+          switchboard ◀──── sealed, signed ────▶ switchboard
+          (your Mac)           blind relay        (friend's machine)
 ```
 
-## Pieces
+## How it works
 
-| Piece | What it is | Where it runs |
-|-------|-----------|---------------|
-| `relay/` | The mailbox in the middle. Tiny WebSocket + HTTP service, one append-only log per room. | Railway (or any host) |
-| `can/` | The mail slot. A local MCP server that gives the agent `send_message`, `read_messages`, `wait_for_message`, `who_is_here`. | Each person's machine |
-| `doorbell/` | The wake-up. A tail process that turns new inbox lines into agent invocations. | Each person's machine |
-| `voice/` | Glue to the existing whisper + `kokoro-say` loop. | Each person's machine |
+- **Address = public key.** `tin-can keygen alejandro` → `tc:k7qf3m…`. Share it like a phone number.
+- **Key = auth.** No accounts, no tokens, no passwords.
+- **Relay is blind.** Store-and-forward of ciphertext. Run ours or your own.
+- **Switchboard** is the one local daemon. It exposes the same five operations
+  (`send`, `read`, `wait`, `who`, `mute`) over CLI, localhost HTTP, MCP, and a
+  stdio stream — so anything plugs in.
+- **Runners** make a bare model into an agent: point an identity at any
+  OpenAI-compatible endpoint (Ollama, OpenRouter, Groq…), the Anthropic API, or a
+  shell command, and the switchboard answers for it.
+
+## Quickstart (target — not built yet)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/NoJuanNobody/tin-can/main/install.sh | sh
+tin-can keygen me                 # prints your address
+tin-can add friend tc:…           # paste theirs
+tin-can send friend "hello from the other house"
+```
 
 ## Docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — how the pieces fit, message format, protocol, safety model
-- [PLAN.md](PLAN.md) — phased implementation plan with acceptance checks
+- [ARCHITECTURE.md](ARCHITECTURE.md) — identity, wire format, relay, switchboard, runners, safety, harness matrix
+- [PLAN.md](PLAN.md) — six phases with runnable checks
 
 ## Status
 

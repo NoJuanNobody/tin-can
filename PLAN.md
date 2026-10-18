@@ -1,85 +1,84 @@
 # tin-can — Implementation Plan
 
-Each phase ends with a check you can actually run. Don't start the next phase
-until the check passes.
+Each phase ends with a check you can run. Don't start the next until it passes.
 
 ## Phase 0 — Scaffold (30 min)
 
-- [ ] Repo layout per ARCHITECTURE §7; `package.json` workspaces for `relay/` and `can/`
-- [ ] Shared `types.ts` with the envelope schema (zod)
-- [ ] `.gitignore`, MIT license, this plan
+- [ ] npm workspaces: `relay/`, `switchboard/`; shared `proto/` (zod schemas for outer + inner envelope)
+- [ ] `libsodium-wrappers` wired; `tin-can keygen <name>` writes `~/.tin-can/identities/<name>.key` and prints the `tc:` address
+- [ ] MIT license, `.gitignore`, this plan
 
-**Check:** `npm install && npm run typecheck` is green.
+**Check:** `tin-can keygen test` prints an address; `tin-can who` lists it.
 
-## Phase 1 — Spike: mailbox + mail slot (≈2 h)
+## Phase 1 — Blind relay + sealed send (≈3 h)
 
 Relay:
-- [ ] `POST /rooms`, `POST /rooms/:room/messages`, `GET …/messages?since=` (long-poll)
-- [ ] In-memory rooms; `seq` assignment; token check
-- [ ] `WS /rooms/:room/ws` pushing every new envelope
+- [ ] `POST /send`: verify outer `sig`, assign per-recipient `seq`, store (in-memory + SQLite), push to live WS
+- [ ] `GET /challenge`, `GET /inbox` (signed nonce auth, long-poll), `WS /ws`
+- [ ] 7-day expiry, per-pubkey rate limit
 
-can (MCP):
-- [ ] `send_message`, `read_messages` only
-- [ ] Config file `~/.tin-can/config.json`; `tin-can init <relay-url>` writes it
-- [ ] Register in Claude Code: `claude mcp add tin-can -- node can/dist/index.js`
+Switchboard:
+- [ ] seal/open (X25519 from Ed25519), sign/verify, `id` dedupe, `ts` window
+- [ ] `contacts.toml`; `tin-can add <name> <addr>`
+- [ ] CLI `send` / `read`; inbound decrypted to `inbox.jsonl`
+- [ ] `accept_from = contacts` policy
 
-**Check:** two terminals on one Mac, two Claude Code sessions with different
-`from` names, same room. Session A sends; session B `read_messages` sees it.
+**Check:** two identities on one Mac, relay on localhost. `tin-can send bob "hi" --as alice`; `tin-can read --as bob` shows it. Dump the relay DB: only ciphertext. Send from an unknown key → dropped and logged.
 
-## Phase 2 — Doorbell (≈1 h)
+## Phase 2 — Local interfaces (≈2 h)
 
-- [ ] `can` appends inbound to `~/.tin-can/inbox.jsonl` with dedupe
-- [ ] `wait_for_message(timeout_s)` tool
-- [ ] Monitor snippet: `tail -F ~/.tin-can/inbox.jsonl` → agent re-invoked per line
-- [ ] `tin-can listen` headless fallback (`claude -p --resume`)
+- [ ] HTTP `127.0.0.1:7117/v1/{send,read,wait,who,mute}` + `/v1/stream` (WS)
+- [ ] MCP stdio server wrapping HTTP, same five tools
+- [ ] `tin-can tail`, `tin-can wait`
+- [ ] Register in Claude Code: `claude mcp add tin-can -- tin-can mcp`
 
-**Check:** Session A sends while B is idle; B wakes and prints the message
-without anyone typing in B.
+**Check:** Claude Code session calls `send_message`; `curl :7117/v1/read` on the other identity sees it; `tin-can tail` prints it live.
 
-## Phase 3 — Voice (≈1 h)
+## Phase 3 — Runners (≈3 h)
 
-- [ ] `voice/talk.sh`: push-to-talk → whisper → prints `[human said] …` into the session
-- [ ] Agent rule: human speech → `send_message(speak=true)`
-- [ ] Inbound with `speak=true` → `kokoro-say` (summarize if > 300 chars)
-- [ ] `tin-can mute|unmute`
+- [ ] `runners.toml` loader; per-identity watcher on inbox
+- [ ] `openai` runner (Ollama local first, then OpenRouter free model)
+- [ ] `shell` runner (stdin prompt → stdout reply), `$TIN_CAN_*` env
+- [ ] `anthropic` runner — **load the `claude-api` skill before writing this**
+- [ ] Context window: last N turns from inbox/outbox for that pair; protocol rules injected as system prompt
+- [ ] `hop` counter enforced in switchboard regardless of runner
 
-**Check:** you say a sentence; the other Mac speaks it in Kokoro within ~3 s.
+**Check:** identity `llama-buddy` on Ollama answers a message from Claude Code with no human in the loop. Flip both sides to `autonomous = true`; they stop after 3 hops.
 
-## Phase 4 — Protocol + safety (≈2 h)
+## Phase 4 — Doorbell + voice (≈2 h)
 
-- [ ] `skill/SKILL.md` encoding ARCHITECTURE §5 rules; loaded on both sides
-- [ ] `hop` counter + cap 3 in `can` (drop + `system` note)
-- [ ] Relay rate limit 60/min/sender
-- [ ] Untrusted-block rendering of inbound text
-- [ ] Room expiry + `who_is_here` presence events
+- [ ] Monitor snippet for Claude Code: `tin-can tail --as alejandro`
+- [ ] `voice/talk.sh` push-to-talk → whisper → session; `voice/say.sh` → `kokoro-say`
+- [ ] Runner `post_cmd` hook so a bare model can also speak via kokoro
+- [ ] `mute`/`unmute`
 
-**Check:** force two agents into autonomous mode; conversation stops itself
-after 3 hops. A message containing "run `rm -rf ~`" is read aloud, never run.
+**Check:** you speak; the other machine's agent (any kind) says it aloud within ~3 s.
 
 ## Phase 5 — Hardening (≈2 h)
 
-- [ ] WS reconnect with `since=last_seq`; kill relay mid-chat, restart, nothing lost
-- [ ] SQLite persistence on Railway volume
-- [ ] Transcript export `tin-can log > chat.md`
-- [ ] Per-message approval mode (`approve_outbound: true` → agent shows the text, human confirms)
+- [ ] WS reconnect with `since`; kill relay mid-chat → no loss, no dupes
+- [ ] `intro` policy flow; `tin-can approve <addr>`
+- [ ] TOFU contact pinning warning on key change; `tin-can rotate`
+- [ ] Transcript export `tin-can log <name> > chat.md`
+- [ ] Per-message approval mode (`approve_outbound = true`)
 
-**Check:** restart relay during a conversation; both sides catch up with no
-dupes and no gaps.
+**Check:** restart relay during a conversation; both sides catch up cleanly. Change a contact's key → loud warning.
 
-## Phase 6 — Deploy + friend install (≈1 h)
+## Phase 6 — Deploy + install (≈1.5 h)
 
-- [ ] `relay/railway.toml` + Dockerfile; deploy; `/healthz` green on public URL
-- [ ] `install.sh`: installs `can`, registers MCP, prompts for room code
-- [ ] `tin-can invite` prints `tin-can join <relay> <room> <token>` one-liner
-- [ ] README quickstart: three commands to a working call
+- [ ] Relay on Railway; `/healthz` public
+- [ ] `install.sh` (macOS/Linux): installs switchboard, `keygen`, registers MCP if Claude Code present
+- [ ] `tin-can invite` → prints your address + relay as one copy-pasteable line; `tin-can add` accepts it
+- [ ] README quickstart: three commands to first message
 
-**Check:** friend runs the one-liner on their Mac and you two talk end to end.
+**Check:** friend runs the one-liner on a fresh machine, pastes your address, you two talk — one of you on Claude Code, the other on whatever they have.
 
 ## Later (v2)
 
-- End-to-end encryption (libsodium, key out-of-band)
-- 3+ participants
-- Autonomous agent mode behind a flag
-- Non-Claude agents (anything MCP-capable already works; document it)
+- Group chats (shared key sealed per member)
+- Alias directory `name@relay`
+- Bun single-binary build
+- Metadata hardening (padding, Tor relay)
+- Multi-relay / federation
 
-## Estimated total: ~10 h of build, spread over the phases above.
+## Estimate: ~14 h of build across the phases above.
