@@ -1,84 +1,81 @@
 # tin-can — Implementation Plan
 
-Each phase ends with a check you can run. Don't start the next until it passes.
+Python throughout. Follows CLI-Anything's 7-phase pipeline and HARNESS.md
+(see docs/cli-anything-notes.md). Each phase ends with a runnable check.
 
-## Phase 0 — Scaffold (30 min)
+## Phase 0 — Scaffold + TEST.md part 1 (1 h)
 
-- [ ] npm workspaces: `relay/`, `switchboard/`; shared `proto/` (zod schemas for outer + inner envelope)
-- [ ] `libsodium-wrappers` wired; `tin-can keygen <name>` writes `~/.tin-can/identities/<name>.key` and prints the `tc:` address
-- [ ] MIT license, `.gitignore`, this plan
+- [ ] `switchboard/agent-harness/` layout per ARCHITECTURE §4; `setup.py` with `cli-anything-tincan` + `tin-can` console scripts
+- [ ] Vendor `utils/repl_skin.py` from `cli-anything-plugin/repl_skin.py`
+- [ ] `utils/session.py`: `~/.tin-can/` layout, `_locked_save_json`
+- [ ] Deps: `click`, `pynacl`, `httpx`, `websockets`, `mcp`, `prompt_toolkit`, `tomli`
+- [ ] `TEST.md` part 1: inventory, unit plan, E2E plan, workflow scenarios
+- [ ] `pip install -e .`; `cli-anything-tincan --help` and `--json` scaffolds
 
-**Check:** `tin-can keygen test` prints an address; `tin-can who` lists it.
+**Check:** `which cli-anything-tincan` resolves; `cli-anything-tincan id keygen test --json` prints `{"address":"tc:…"}`.
 
-## Phase 1 — Blind relay + sealed send (≈3 h)
+## Phase 1 — Core crypto + blind relay (3 h)
 
-Relay:
-- [ ] `POST /send`: verify outer `sig`, assign per-recipient `seq`, store (in-memory + SQLite), push to live WS
-- [ ] `GET /challenge`, `GET /inbox` (signed nonce auth, long-poll), `WS /ws`
-- [ ] 7-day expiry, per-pubkey rate limit
+- [ ] `core.py`: keygen, address encode/decode, seal/open, sign/verify, `id` dedupe, `ts` window, contacts (TOFU), policy
+- [ ] `relay/`: `/send`, `/challenge`, `/inbox` (long-poll), `/ws`; sqlite; expiry; rate limit; `relay serve` subcommand
+- [ ] `utils/relay_backend.py`: client with `shutil.which`-style reachability check + loud error
+- [ ] CLI `send`, `read`, `contact add|list`
 
-Switchboard:
-- [ ] seal/open (X25519 from Ed25519), sign/verify, `id` dedupe, `ts` window
-- [ ] `contacts.toml`; `tin-can add <name> <addr>`
-- [ ] CLI `send` / `read`; inbound decrypted to `inbox.jsonl`
-- [ ] `accept_from = contacts` policy
+**Check:** local relay; two identities; `send bob "hi" --as alice`; `read --as bob --json` shows it. Relay DB has ciphertext only. Unknown sender → dropped + logged.
 
-**Check:** two identities on one Mac, relay on localhost. `tin-can send bob "hi" --as alice`; `tin-can read --as bob` shows it. Dump the relay DB: only ciphertext. Send from an unknown key → dropped and logged.
+## Phase 2 — MCP + streaming (2 h)
 
-## Phase 2 — Local interfaces (≈2 h)
+- [ ] `mcp_server.py` with `tincan_*` tools over `core`; `cli-anything-tincan mcp`
+- [ ] `wait`, `tail`, `who`, `mute|unmute`
+- [ ] `daemon start|stop|status` (WS, inbox append, pid file)
+- [ ] `claude mcp add tin-can -- cli-anything-tincan mcp`
 
-- [ ] HTTP `127.0.0.1:7117/v1/{send,read,wait,who,mute}` + `/v1/stream` (WS)
-- [ ] MCP stdio server wrapping HTTP, same five tools
-- [ ] `tin-can tail`, `tin-can wait`
-- [ ] Register in Claude Code: `claude mcp add tin-can -- tin-can mcp`
+**Check:** Claude Code calls `tincan_send`; `cli-anything-tincan tail --as bob` prints it live; hermes gets it via `read --json`.
 
-**Check:** Claude Code session calls `send_message`; `curl :7117/v1/read` on the other identity sees it; `tin-can tail` prints it live.
+## Phase 3 — REPL (1.5 h)
 
-## Phase 3 — Runners (≈3 h)
+- [ ] `invoke_without_command=True` → `ReplSkin` chat: `/to`, `/as`, `/speak`, `/who`, `/mute`; inbound printed live; history
+- [ ] Document "undo/redo n/a" per HARNESS.md
 
-- [ ] `runners.toml` loader; per-identity watcher on inbox
-- [ ] `openai` runner (Ollama local first, then OpenRouter free model)
-- [ ] `shell` runner (stdin prompt → stdout reply), `$TIN_CAN_*` env
-- [ ] `anthropic` runner — **load the `claude-api` skill before writing this**
-- [ ] Context window: last N turns from inbox/outbox for that pair; protocol rules injected as system prompt
-- [ ] `hop` counter enforced in switchboard regardless of runner
+**Check:** two REPLs on one Mac chat in real time.
 
-**Check:** identity `llama-buddy` on Ollama answers a message from Claude Code with no human in the loop. Flip both sides to `autonomous = true`; they stop after 3 hops.
+## Phase 4 — Runners (3 h)
 
-## Phase 4 — Doorbell + voice (≈2 h)
+- [ ] `runners.toml` loader; per-identity inbox watcher in daemon
+- [ ] `openai` runner (Ollama first, then OpenRouter free model)
+- [ ] `shell` runner (`$TIN_CAN_*` env, stdin→stdout), `post_cmd`
+- [ ] `anthropic` runner — **load `claude-api` skill first**
+- [ ] Context window from inbox/outbox; protocol rules injected; `hop` enforced in core
 
-- [ ] Monitor snippet for Claude Code: `tin-can tail --as alejandro`
-- [ ] `voice/talk.sh` push-to-talk → whisper → session; `voice/say.sh` → `kokoro-say`
-- [ ] Runner `post_cmd` hook so a bare model can also speak via kokoro
-- [ ] `mute`/`unmute`
+**Check:** Ollama identity answers Claude Code with no human. Both autonomous → stop after 3 hops.
 
-**Check:** you speak; the other machine's agent (any kind) says it aloud within ~3 s.
+## Phase 5 — Voice + doorbell (1.5 h)
 
-## Phase 5 — Hardening (≈2 h)
+- [ ] `voice/talk.sh` (push-to-talk → whisper → `send --speak`), `voice/say.sh` (`kokoro-say`)
+- [ ] REPL speaks `speak=true`; Monitor snippet for Claude Code (`tail`)
+- [ ] `SKILL.md` (canonical + compat) with protocol rules and agent guidance
 
-- [ ] WS reconnect with `since`; kill relay mid-chat → no loss, no dupes
-- [ ] `intro` policy flow; `tin-can approve <addr>`
-- [ ] TOFU contact pinning warning on key change; `tin-can rotate`
-- [ ] Transcript export `tin-can log <name> > chat.md`
-- [ ] Per-message approval mode (`approve_outbound = true`)
+**Check:** speak on A; B's agent (any kind) says it aloud ≤3 s.
 
-**Check:** restart relay during a conversation; both sides catch up cleanly. Change a contact's key → loud warning.
+## Phase 6 — Tests + validate + hardening (3 h)
 
-## Phase 6 — Deploy + install (≈1.5 h)
+- [ ] `test_core.py` (unit), `test_e2e.py` (spins local relay, real send/receive, real artifacts), `test_cli.py` (`_resolve_cli`, no `cwd`, `CLI_ANYTHING_FORCE_INSTALLED=1`)
+- [ ] `TEST.md` part 2 with full `pytest -v` output
+- [ ] WS reconnect with `since`; `intro` flow + `contact approve`; `id rotate`; `log --md`; approve-outbound mode
+- [ ] `/cli-anything:validate` passes
+
+**Check:** kill relay mid-chat → no loss, no dupes. Changed contact key → loud warning. Validate green.
+
+## Phase 7 — Publish (1.5 h)
 
 - [ ] Relay on Railway; `/healthz` public
-- [ ] `install.sh` (macOS/Linux): installs switchboard, `keygen`, registers MCP if Claude Code present
-- [ ] `tin-can invite` → prints your address + relay as one copy-pasteable line; `tin-can add` accepts it
-- [ ] README quickstart: three commands to first message
+- [ ] `install.sh`; `invite` one-liner; README quickstart
+- [ ] PyPI `cli-anything-tincan`; submit to cli-hub registry
 
-**Check:** friend runs the one-liner on a fresh machine, pastes your address, you two talk — one of you on Claude Code, the other on whatever they have.
+**Check:** friend: `pip install cli-anything-tincan`, paste your address, you talk — one side Claude Code, other side whatever they have.
 
-## Later (v2)
+## Later
 
-- Group chats (shared key sealed per member)
-- Alias directory `name@relay`
-- Bun single-binary build
-- Metadata hardening (padding, Tor relay)
-- Multi-relay / federation
+Group chats · alias directory `name@relay` · metadata hardening · multi-relay · PR a `tincan/` harness upstream to HKUDS/CLI-Anything.
 
-## Estimate: ~14 h of build across the phases above.
+## Estimate: ~17 h.

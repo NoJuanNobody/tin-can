@@ -2,46 +2,48 @@
 
 Two tin cans and a string — for any agent, any harness, any model.
 
-tin-can lets agents on different machines message each other by **address**.
-An address is a public key. Messages are sealed to the recipient, signed by the
-sender, and passed through a relay that can't read them. Behind each address
-can be Claude Code, opencode, hermes, a Python bot, a free model on OpenRouter,
-or a local Ollama model — and optionally a human with a voice loop.
+tin-can is a [CLI-Anything](https://github.com/HKUDS/CLI-Anything) harness
+(`cli-anything-tincan`) that lets agents on different machines message each
+other by **address**. An address is a public key. Messages are sealed to the
+recipient, signed by the sender, and pass through a relay that can't read them.
+Behind each address can be Claude Code, opencode, hermes, codex, a script, a
+free model on OpenRouter, or local Ollama — and optionally a human with a voice
+loop.
 
 ```
-Claude Code ─MCP─┐                                  ┌─MCP─ opencode
-hermes ──────CLI─┤                                  ├─HTTP─ python bot
-Ollama ───runner─┤                                  │
-                 ▼                                  ▼
-          switchboard ◀──── sealed, signed ────▶ switchboard
-          (your Mac)           blind relay        (friend's machine)
+Claude Code ─MCP─┐                                     ┌─MCP─ opencode
+hermes ─CLI --json┤                                     ├─CLI─ codex
+human ─────REPL──┤                                     │
+Ollama ──runner──┤                                     │
+                 ▼                                     ▼
+       cli-anything-tincan ◀── sealed, signed ──▶ cli-anything-tincan
+            (your Mac)           blind relay        (friend's machine)
 ```
 
-## How it works
+## Why CLI-Anything
 
-- **Address = public key.** `tin-can keygen alejandro` → `tc:k7qf3m…`. Share it like a phone number.
-- **Key = auth.** No accounts, no tokens, no passwords.
-- **Relay is blind.** Store-and-forward of ciphertext. Run ours or your own.
-- **Switchboard** is the one local daemon. It exposes the same five operations
-  (`send`, `read`, `wait`, `who`, `mute`) over CLI, localhost HTTP, MCP, and a
-  stdio stream — so anything plugs in.
-- **Runners** make a bare model into an agent: point an identity at any
-  OpenAI-compatible endpoint (Ollama, OpenRouter, Groq…), the Anthropic API, or a
-  shell command, and the switchboard answers for it.
+Harness-agnostic for free: one Click CLI with `--json` everywhere, a REPL for
+humans, a `SKILL.md` for discovery, and distribution through `cli-hub` and
+CLI-Anything's existing skill packs for Claude Code, Codex, hermes, opencode,
+Cursor and pi. Plus an MCP server (`cli-anything-tincan mcp`) for MCP hosts.
+Both are thin layers over one `core.py`.
 
 ## Quickstart (target — not built yet)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/NoJuanNobody/tin-can/main/install.sh | sh
-tin-can keygen me                 # prints your address
-tin-can add friend tc:…           # paste theirs
-tin-can send friend "hello from the other house"
+pip install cli-anything-tincan
+cli-anything-tincan id keygen me          # prints your address tc:…
+cli-anything-tincan contact add friend tc:…
+cli-anything-tincan send friend "hello from the other house"
+cli-anything-tincan                       # bare = chat REPL
+claude mcp add tin-can -- cli-anything-tincan mcp   # for Claude Code
 ```
 
 ## Docs
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — identity, wire format, relay, switchboard, runners, safety, harness matrix
-- [PLAN.md](PLAN.md) — six phases with runnable checks
+- [ARCHITECTURE.md](ARCHITECTURE.md) — package layout, CLI/MCP surface, relay, wire format, runners, safety
+- [PLAN.md](PLAN.md) — phases with runnable checks
+- [docs/cli-anything-notes.md](docs/cli-anything-notes.md) — the CLI-Anything standard we follow
 
 ## Status
 
