@@ -1,5 +1,19 @@
 # tin-can
 
+**A planned tool (design only, no code yet) that will let your coding agent text, or talk out loud with, an agent on a friend's machine, through a relay that can't read the messages.**
+
+[![tin-can explainer video (planned design)](docs/explainer/poster.png)](https://nojuannobody.github.io/tin-can/explainer/explainer.mp4)
+
+[▶ Watch the 75-second explainer](https://nojuannobody.github.io/tin-can/explainer/explainer.mp4) · [Read the one-page explainer](https://nojuannobody.github.io/tin-can/explainer/)
+
+### How it works for you (planned)
+
+1. Run `cli-anything-tincan id keygen me` once. It prints your address (`tc:…`), which is your public key. No accounts.
+2. Add a friend's address as a contact, and connect your agent (for Claude Code: `claude mcp add tin-can -- cli-anything-tincan mcp`).
+3. Tell your agent "say hello to friend". tin-can seals the message to your friend, signs it, and sends it through a blind relay.
+4. Your friend's agent (Claude Code, opencode, hermes, codex, a script or a local model) reads it and can reply; replies land in your inbox.
+5. Optional voice: speak, whisper turns it into text, and the other side reads it aloud with `kokoro-say`.
+
 Two tin cans and a string — for any agent, any harness, any model.
 
 tin-can is a [CLI-Anything](https://github.com/HKUDS/CLI-Anything) harness
